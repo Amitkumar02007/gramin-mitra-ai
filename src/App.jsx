@@ -113,7 +113,28 @@ function extractJsonObject(text) {
   throw new Error("AI ka JSON jawab adhura tha. Kripya dobara koshish karein.");
 }
 
-function normalizeAnswer(text) {
+function createSafeFallbackAnswer(prompt, reason) {
+  return {
+    greeting: "Ram Ram Kisan bhai!",
+    crop: prompt?.trim() || "Aapki fasal / query",
+    diseaseName: "AI se pushti abhi uplabdh nahi",
+    riskLevel: "Jaanch zaroori",
+    riskScore: null,
+    diagnosis:
+      "Live AI jawab nahi mil saka, isliye kisi rog ya poshak-tatva ki kami ka nidan nahi kiya gaya. Sahi pehchan ke liye najdeeki Krishi Vigyan Kendra ya krishi adhikari se sampark karein.",
+    remedies: [
+      "Bina samasya ki pakki pehchan ke fasal par dawa ya spray na karein.",
+      "Prabhavit paudhon ki saaf tasveer aur lakshan note karke najdeeki Krishi Vigyan Kendra ko dikhayein.",
+      "Zyada nuksan ya tezi se failav dikhe to apne sthaniya krishi adhikari se jaldi salah lein.",
+    ],
+    schemes: [],
+    helpline: DEFAULT_HELPLINE,
+    isFallback: true,
+    fallbackReason: reason || "Live AI service se sampark nahi ho saka.",
+  };
+}
+
+function normalizeAnswer(text, prompt) {
   const rawText =
     typeof text === "string"
       ? text
@@ -129,27 +150,20 @@ function normalizeAnswer(text) {
       throw new Error("AI ka jawab expected JSON object format mein nahi hai.");
     }
   } catch (parseError) {
-    console.warn("AI response was not valid JSON; showing the raw response.", parseError);
-    parsed = {
-      greeting: "Aapka jawab taiyar hai.",
-      crop: "Aapka sawal",
-      disease_name: "Aapke sawal ka jawab",
-      risk_level: "Jaankari",
-      risk_score_percent: 0,
-      diagnosis:
-        rawText || "AI se jawab mila, lekin uska format samajh nahi aaya.",
-      desi_remedies: [],
-      government_schemes: [],
-      emergency_helpline: DEFAULT_HELPLINE,
-    };
+    console.warn("AI response was not valid JSON.", parseError);
+    return createSafeFallbackAnswer(
+      prompt,
+      "AI ka jawab samajhne layak JSON format mein nahi tha.",
+    );
   }
 
   const asText = (value, fallback = "") =>
     typeof value === "string" ? value.trim() : fallback;
-  const parsedScore = Number(parsed.risk_score_percent);
-  const riskScore = Number.isFinite(parsedScore)
-    ? Math.min(100, Math.max(0, Math.round(parsedScore)))
-    : 0;
+  const parsedScore = parsed.risk_score_percent;
+  const riskScore =
+    typeof parsedScore === "number" && Number.isFinite(parsedScore)
+      ? Math.min(100, Math.max(0, Math.round(parsedScore)))
+      : null;
   const schemes = Array.isArray(parsed?.government_schemes)
     ? parsed.government_schemes
         ?.filter((scheme) => scheme && typeof scheme === "object")
@@ -170,7 +184,13 @@ function normalizeAnswer(text) {
     diseaseName: asText(parsed.disease_name, "Samasya ki pehchan"),
     riskLevel: asText(
       parsed.risk_level,
-      riskScore >= 70 ? "Gambhir (High)" : riskScore >= 35 ? "Madhyam (Medium)" : "Samanya (Low)",
+      riskScore === null
+        ? "Risk score uplabdh nahi"
+        : riskScore >= 70
+          ? "Gambhir (High)"
+          : riskScore >= 35
+            ? "Madhyam (Medium)"
+            : "Samanya (Low)",
     ),
     riskScore,
     diagnosis: asText(parsed.diagnosis, "Vistar se pehchan nahi di gayi."),
@@ -181,10 +201,19 @@ function normalizeAnswer(text) {
       : [],
     schemes,
     helpline,
+    isFallback: false,
+    fallbackReason: "",
   };
 }
 
 function getRiskColors(score) {
+  if (score === null || score === undefined) {
+    return {
+      foreground: "#cbd5e1",
+      background: "rgba(203, 213, 225, 0.12)",
+      border: "rgba(203, 213, 225, 0.36)",
+    };
+  }
   if (score >= 70) {
     return {
       foreground: "#f87171",
@@ -225,7 +254,8 @@ function SolutionView({ answer }) {
   const [speechError, setSpeechError] = useState("");
   const utteranceRef = useRef(null);
   const safeAnswer = answer || {};
-  const riskColors = getRiskColors(safeAnswer.riskScore || 0);
+  const hasRiskScore = Number.isFinite(safeAnswer.riskScore);
+  const riskColors = getRiskColors(safeAnswer.riskScore);
   const callableNumber = (safeAnswer.helpline || DEFAULT_HELPLINE).replace(/[^\d+]/g, "");
   const remedies = Array.isArray(safeAnswer.remedies) ? safeAnswer.remedies : [];
   const schemes = Array.isArray(safeAnswer.schemes) ? safeAnswer.schemes : [];
@@ -296,11 +326,35 @@ function SolutionView({ answer }) {
       <header className="solution-heading">
         <span className="solution-icon" aria-hidden="true">💡</span>
         <div>
-          <p className="eyebrow">Aapke liye taiyar kiya gaya</p>
-          <h2 id="solution-title">Gramin-Mitra Salah &amp; Upchaar</h2>
+          <p className="eyebrow">
+            {safeAnswer.isFallback
+              ? "LIVE AI JAWAB UPLABDH NAHI"
+              : "Aapke liye taiyar kiya gaya"}
+          </p>
+          <h2 id="solution-title">
+            {safeAnswer.isFallback
+              ? "Surakshit agle kadam"
+              : "Gramin-Mitra Salah &amp; Upchaar"}
+          </h2>
         </div>
-        <span className="answer-tag">Kheti salah</span>
+        <span className="answer-tag">
+          {safeAnswer.isFallback ? "General safety" : "Kheti salah"}
+        </span>
       </header>
+      {safeAnswer.isFallback && (
+        <div className="service-fallback-notice" role="status">
+          <span aria-hidden="true">!</span>
+          <div>
+            <strong>Live AI salah abhi uplabdh nahi hai.</strong>{" "}
+            Neeche di gayi jaankari general safety guidance hai, fasal ka diagnosis nahi.
+            {safeAnswer.fallbackReason && (
+              <div style={{ marginTop: 5, fontSize: 12 }}>
+                Karan: {safeAnswer.fallbackReason}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       <div className="speech-controls">
         <button
           className="speech-button"
@@ -355,7 +409,9 @@ function SolutionView({ answer }) {
             >
               <strong>Fasal Risk Meter</strong>
               <span style={{ color: riskColors.foreground, fontWeight: 700 }}>
-                {safeAnswer.riskLevel || "Samanya"} · {safeAnswer.riskScore || 0}%
+                {hasRiskScore
+                  ? `${safeAnswer.riskLevel || "Risk"} · ${safeAnswer.riskScore}%`
+                  : "Risk score ke liye live jaanch zaroori"}
               </span>
             </div>
             <div
@@ -363,7 +419,12 @@ function SolutionView({ answer }) {
               aria-label="Fasal risk score"
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-valuenow={safeAnswer.riskScore || 0}
+              aria-valuetext={
+                hasRiskScore
+                  ? `${safeAnswer.riskScore}%`
+                  : "Risk score uplabdh nahi; live diagnosis zaroori"
+              }
+              {...(hasRiskScore ? { "aria-valuenow": safeAnswer.riskScore } : {})}
               style={{
                 height: 9,
                 overflow: "hidden",
@@ -373,10 +434,10 @@ function SolutionView({ answer }) {
             >
               <div
                 style={{
-                  width: `${safeAnswer.riskScore || 0}%`,
+                  width: `${hasRiskScore ? safeAnswer.riskScore : 0}%`,
                   height: "100%",
                   borderRadius: "inherit",
-                  backgroundColor: riskColors.foreground,
+                  backgroundColor: hasRiskScore ? riskColors.foreground : "transparent",
                   transition: "width 300ms ease",
                 }}
               />
@@ -644,13 +705,15 @@ function GraminMitraApp() {
         language: responseLanguage,
         apiKey,
       });
-      setAnswer(normalizeAnswer(result));
+      setAnswer(normalizeAnswer(result, query));
     } catch (err) {
       console.error(err);
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Network ya API issue aaya hai.",
+      setError("");
+      setAnswer(
+        createSafeFallbackAnswer(
+          query,
+          err instanceof Error ? err.message : "Network ya API issue aaya hai.",
+        ),
       );
     } finally {
       setLoading(false);
@@ -780,8 +843,26 @@ function GraminMitraApp() {
                   {showApiKey ? "Chhupayein" : "Dikhayein"}
                 </button>
               </div>
+              {apiKey.trim() && (
+                <button
+                  type="button"
+                  className="key-clear-button"
+                  onClick={() => {
+                    setApiKey("");
+                    setError("");
+                    try {
+                      window.localStorage?.removeItem("GEMINI_API_KEY");
+                    } catch (storageError) {
+                      console.warn("Could not remove the saved custom API key.", storageError);
+                    }
+                  }}
+                  disabled={loading}
+                >
+                  Is key ko hata kar server key use karein
+                </button>
+              )}
               <span id="custom-api-key-hint">
-                Custom key is device par save hogi aur request ke samay secure server ko bheji jayegi.
+                Apni custom key yahan save hoti hai. Field khaali ho to server par configured key use hogi.
               </span>
             </div>
 

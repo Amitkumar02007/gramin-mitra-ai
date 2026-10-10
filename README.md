@@ -31,8 +31,8 @@ Over 65% of rural communities and farmers in India face two critical technologic
 ## 🏗️ Architecture
 
 The browser calls the same-origin `/api/gemma` Vercel Function. The function
-keeps the Google AI Studio credential server-side and tries Gemini 3.8 Flash
-first, then the configured fallback models. Never use a `VITE_` prefix for
+keeps the Google AI Studio credential server-side and tries Gemini 2.5 Flash,
+then Gemini 2.0 Flash as a fallback. Never use a `VITE_` prefix for
 the provider key: Vite publishes `VITE_` variables in browser assets.
 
 ### Configure AI access
@@ -42,11 +42,15 @@ the provider key: Vite publishes `VITE_` variables in browser assets.
    `GEMINI_API_KEY` for the environments you deploy to. Do not add the key as a
    `VITE_` variable or commit it to Git.
 3. For local development, create an ignored `.env.local` file in the project
-   root with `GEMINI_API_KEY=your_private_key`, then run `npx vercel dev` so
-   both the Vite app and `/api/gemma` function are available locally.
+   root with `GEMINI_API_KEY=your_private_key`, then run `npm run dev`.
+   The Vite development middleware serves `/api/gemma` locally and reads the
+   key on the server only. You can also run `npx vercel dev` to use Vercel's
+   local function runtime.
 4. Configure request rate limits for `/api/gemma` in your deployment platform
    before opening the demo to public traffic. The function is a public endpoint
    and an exposed provider key could otherwise be used to incur API charges.
 
-The old browser API key is no longer used and the app clears the legacy
-`GEMINI_API_KEY` localStorage entries when it starts.
+The optional Evaluation / API Key field is for judges who need to supply their
+own key; it is saved in that browser's local storage and sent to the API route
+for that request. Leave it blank to use the server-side `GEMINI_API_KEY`.
+Clear the field after evaluation if you do not want the browser to retain it.
