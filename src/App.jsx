@@ -180,7 +180,7 @@ function normalizeAnswer(text, prompt) {
 
   return {
     greeting: asText(parsed.greeting),
-    crop: asText(parsed.crop, "Aapki fasal / query"),
+    crop: asText(parsed.crop, prompt?.trim() || "Aapki fasal / query"),
     diseaseName: asText(parsed.disease_name, "Samasya ki pehchan"),
     riskLevel: asText(
       parsed.risk_level,
