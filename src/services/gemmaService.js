@@ -1,4 +1,8 @@
-export async function askGemma({ prompt } = {}) {
+export async function askGemma({
+  prompt,
+  language = "Hinglish (Mix)",
+  apiKey = "",
+} = {}) {
   const cleanPrompt = prompt?.trim();
 
   if (!cleanPrompt) {
@@ -8,7 +12,11 @@ export async function askGemma({ prompt } = {}) {
   const response = await fetch("/api/gemma", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt: cleanPrompt }),
+    body: JSON.stringify({
+      prompt: cleanPrompt,
+      language,
+      ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+    }),
   });
 
   const data = await response.json().catch(() => null);

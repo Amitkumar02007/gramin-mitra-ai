@@ -1,7 +1,21 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { askGemma } from "./services/gemmaService.js";
 
 const DEFAULT_HELPLINE = "Kisan Call Center: 1800-180-1551";
+const RESPONSE_LANGUAGES = [
+  "Hinglish (Mix)",
+  "Hindi (हिन्दी)",
+  "Bhojpuri (भोजपुरी)",
+];
+
+function getInitialApiKey() {
+  try {
+    return window.localStorage?.getItem("GEMINI_API_KEY") || "";
+  } catch (storageError) {
+    console.warn("Could not read the saved custom API key.", storageError);
+    return "";
+  }
+}
 
 const PRESETS = [
   {
@@ -100,10 +114,34 @@ function extractJsonObject(text) {
 }
 
 function normalizeAnswer(text) {
-  const parsed = extractJsonObject(text);
+  const rawText =
+    typeof text === "string"
+      ? text
+          .replace(/```(?:json)?/gi, "")
+          .replace(/```/g, "")
+          .trim()
+      : "";
+  let parsed;
 
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("AI ka jawab expected JSON object format mein nahi hai.");
+  try {
+    parsed = extractJsonObject(rawText);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("AI ka jawab expected JSON object format mein nahi hai.");
+    }
+  } catch (parseError) {
+    console.warn("AI response was not valid JSON; showing the raw response.", parseError);
+    parsed = {
+      greeting: "Aapka jawab taiyar hai.",
+      crop: "Aapka sawal",
+      disease_name: "Aapke sawal ka jawab",
+      risk_level: "Jaankari",
+      risk_score_percent: 0,
+      diagnosis:
+        rawText || "AI se jawab mila, lekin uska format samajh nahi aaya.",
+      desi_remedies: [],
+      government_schemes: [],
+      emergency_helpline: DEFAULT_HELPLINE,
+    };
   }
 
   const asText = (value, fallback = "") =>
@@ -183,6 +221,9 @@ function ResultCard({ children, color, background }) {
 }
 
 function SolutionView({ answer }) {
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speechError, setSpeechError] = useState("");
+  const utteranceRef = useRef(null);
   const safeAnswer = answer || {};
   const riskColors = getRiskColors(safeAnswer.riskScore || 0);
   const callableNumber = (safeAnswer.helpline || DEFAULT_HELPLINE).replace(/[^\d+]/g, "");
@@ -191,6 +232,64 @@ function SolutionView({ answer }) {
   const phoneHref = callableNumber
     ? `tel:${callableNumber}`
     : "tel:18001801551";
+
+  useEffect(() => () => {
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+  }, []);
+
+  function toggleSpeech() {
+    if (typeof window === "undefined" || !window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== "function") {
+      setSpeechError("Is browser mein awaaz sunane ki suvidha uplabdh nahi hai.");
+      return;
+    }
+
+    if (isSpeaking) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      utteranceRef.current = null;
+      setSpeechError("");
+      return;
+    }
+
+    const speechText = [
+      safeAnswer.diagnosis,
+      ...remedies,
+    ].filter(Boolean).join(". ");
+
+    if (!speechText) {
+      setSpeechError("Sunane ke liye jawab uplabdh nahi hai.");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new window.SpeechSynthesisUtterance(speechText);
+    utterance.lang = "hi-IN";
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      utteranceRef.current = null;
+    };
+    utterance.onerror = (event) => {
+      setIsSpeaking(false);
+      utteranceRef.current = null;
+      if (event.error !== "canceled" && event.error !== "interrupted") {
+        setSpeechError("Awaaz nahi chal saki. Aap jawab padh sakte hain.");
+      }
+    };
+
+    utteranceRef.current = utterance;
+    setSpeechError("");
+    setIsSpeaking(true);
+    try {
+      window.speechSynthesis.speak(utterance);
+    } catch (synthesisError) {
+      setIsSpeaking(false);
+      utteranceRef.current = null;
+      setSpeechError("Awaaz nahi chal saki. Aap jawab padh sakte hain.");
+      console.warn("Speech synthesis could not be started.", synthesisError);
+    }
+  }
 
   return (
     <article className="solution-card" aria-labelledby="solution-title">
@@ -202,6 +301,17 @@ function SolutionView({ answer }) {
         </div>
         <span className="answer-tag">Kheti salah</span>
       </header>
+      <div className="speech-controls">
+        <button
+          className="speech-button"
+          type="button"
+          onClick={toggleSpeech}
+          aria-pressed={isSpeaking}
+        >
+          {isSpeaking ? "⏹️ Band Karein" : "🔊 Awaaz Me Sunein"}
+        </button>
+        {speechError && <span className="speech-error" role="status">{speechError}</span>}
+      </div>
 
       <div style={{ display: "grid", gap: 14, padding: 18 }}>
         <ResultCard
@@ -423,18 +533,96 @@ function SolutionView({ answer }) {
 
 function GraminMitraApp() {
   const [prompt, setPrompt] = useState("");
+  const [apiKey, setApiKey] = useState(getInitialApiKey);
+  const [responseLanguage, setResponseLanguage] = useState(RESPONSE_LANGUAGES[0]);
   const [answer, setAnswer] = useState(null);
   const [error, setError] = useState("");
+  const [voiceError, setVoiceError] = useState("");
+  const [isListening, setIsListening] = useState(false);
   const [loading, setLoading] = useState(false);
+  const recognitionRef = useRef(null);
 
   useEffect(() => {
-    try {
-      window.localStorage?.removeItem("GEMINI_API_KEY");
-      window.localStorage?.removeItem("gramin-mitra-google-ai-api-key");
-    } catch (storageError) {
-      console.warn("Could not remove the legacy browser-stored API key.", storageError);
-    }
+    return () => {
+      recognitionRef.current?.abort();
+      recognitionRef.current = null;
+    };
   }, []);
+
+  function toggleVoiceInput() {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setVoiceError("Is browser mein voice typing supported nahi hai. Aap sawal type kar sakte hain.");
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.lang = responseLanguage.startsWith("Bhojpuri")
+        ? "hi-IN"
+        : responseLanguage.startsWith("Hindi")
+          ? "hi-IN"
+          : "en-IN";
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.onresult = (event) => {
+        const transcript = Array.from(event.results || [])
+          .map((result) => result?.[0]?.transcript || "")
+          .join(" ")
+          .trim();
+
+        if (transcript) {
+          setPrompt((currentPrompt) =>
+            `${currentPrompt.trim()}${currentPrompt.trim() ? " " : ""}${transcript}`.slice(0, 2000),
+          );
+        }
+      };
+      recognition.onerror = (event) => {
+        setIsListening(false);
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          setVoiceError("Mic ki permission nahi mili. Browser settings mein mic allow karein, ya sawal type karein.");
+        } else if (event.error === "no-speech") {
+          setVoiceError("Awaaz sunai nahi di. Dobara koshish karein ya sawal type karein.");
+        } else {
+          setVoiceError("Voice typing nahi chal saki. Aap sawal type kar sakte hain.");
+        }
+        recognitionRef.current = null;
+      };
+      recognition.onend = () => {
+        setIsListening(false);
+        recognitionRef.current = null;
+      };
+
+      setVoiceError("");
+      recognitionRef.current = recognition;
+      recognition.start();
+      setIsListening(true);
+    } catch (recognitionError) {
+      recognitionRef.current = null;
+      setIsListening(false);
+      setVoiceError("Mic shuru nahi ho saka. Browser permission jaanchein ya sawal type karein.");
+      console.warn("Speech recognition could not be started.", recognitionError);
+    }
+  }
+
+  function selectQuestion(question) {
+    setPrompt(question);
+    setError("");
+    document.getElementById("ask-mitra")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+    window.setTimeout(() => {
+      document.getElementById("farmer-question")?.focus({ preventScroll: true });
+    }, 450);
+  }
 
   async function handleAsk(event) {
     event.preventDefault();
@@ -450,13 +638,17 @@ function GraminMitraApp() {
     setAnswer(null);
 
     try {
-      const result = await askGemma({ prompt: query });
+      const result = await askGemma({
+        prompt: query,
+        language: responseLanguage,
+        apiKey,
+      });
       setAnswer(normalizeAnswer(result));
-    } catch (requestError) {
-      console.error(requestError);
+    } catch (err) {
+      console.error(err);
       setError(
-        requestError instanceof Error
-          ? requestError.message
+        err instanceof Error
+          ? err.message
           : "Network ya API issue aaya hai.",
       );
     } finally {
@@ -474,11 +666,17 @@ function GraminMitraApp() {
             <span className="brand-subtitle">GRAMIN-MITRA AI</span>
           </span>
         </a>
+        <nav className="primary-nav" aria-label="Main navigation">
+          <a href="#madad">Hamari madad</a>
+          <a href="#kaise-kaam-karta-hai">Kaise kaam karta hai</a>
+          <a href="#technology">Technology</a>
+        </nav>
         <div className="header-badges">
           <span className="badge badge-model">
             <span className="status-dot" aria-hidden="true" />
             Google Gemma 4 Open Architecture
           </span>
+          <a className="header-cta" href="#ask-mitra">Sawal poochhein <span aria-hidden="true">↗</span></a>
         </div>
       </header>
 
@@ -487,91 +685,141 @@ function GraminMitraApp() {
           <div className="hero-copy">
             <span className="hero-kicker">
               <span className="status-dot" aria-hidden="true" />
-              Kisanon ke liye AI · Gemma 4 Open Architecture
+              Kisanon ke liye AI · Google Gemma 4 Open Architecture
             </span>
             <h1>
-              Har khet ki samajh.
+              Kheti ki har baat,
               <br />
-              <span>Har kisan ka saathi.</span>
+              <span>aapki bhasha mein.</span>
             </h1>
             <p>
-              Fasal ki pehchan se sarkari yojana tak—apna sawal apni bhasha mein
-              poochhiye aur paaiye seedhi, samajhne layak salah.
+              Fasal, kheti ke saste tareeke ya sarkari yojana—apni boli mein
+              poochhiye aur agla kadam jaanein.
             </p>
             <div className="hero-trust-row" aria-label="Gramin-Mitra features">
               <span><i aria-hidden="true">✦</i> Saral Hinglish</span>
-              <span><i aria-hidden="true">✦</i> Kaam ke kheti sujhav</span>
+              <span><i aria-hidden="true">✦</i> Kheti ke kaam ke sujhav</span>
               <span><i aria-hidden="true">✦</i> Yojana ki jaankari</span>
             </div>
+            <div className="hero-actions">
+              <a className="hero-primary-action" href="#ask-mitra">
+                Apna sawal likhein <span aria-hidden="true">↗</span>
+              </a>
+              <a className="hero-secondary-action" href="#kaise-kaam-karta-hai">
+                Dekhein kaise madad milegi <span aria-hidden="true">↓</span>
+              </a>
+            </div>
           </div>
-          <div className="hero-art" aria-hidden="true">
-            <span className="sun" />
-            <span className="field field-back" />
-            <span className="field" />
-            <span className="field field-front" />
-            <span className="art-leaf leaf-one">✦</span>
-            <span className="art-leaf leaf-two">✦</span>
-            <div className="hero-art-card">
-              <span className="hero-art-card-icon">🌱</span>
+          <div className="hero-art">
+            <img
+              src="https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1200&q=85"
+              alt="Subah ki roshni mein hari-bhari fasal ke khet"
+              loading="eager"
+            />
+            <div className="hero-photo-shade" />
+            <div className="hero-image-caption">
+              <span className="hero-caption-icon" aria-hidden="true">🌱</span>
               <span>
-                <strong>Gaon se judi salah</strong>
+                <strong>Kheti ki salah, apni bhasha mein</strong>
                 <small>Fasal · Upchaar · Yojana</small>
               </span>
-              <span className="hero-art-spark">✦</span>
             </div>
+            <span className="photo-credit-note">Gramin-Mitra AI · Kisan ke saath</span>
           </div>
         </section>
 
-        <div className="workspace">
+        <div className="workspace" id="ask-mitra">
           <section className="assistant-panel" aria-label="Kisan sawal form">
             <div className="assistant-intro">
               <div>
-                <span className="assistant-eyebrow">AAPKA DIGITAL KRISHI SAATHI</span>
-                <h2>Batayein, aaj kis baat mein madad chahiye?</h2>
-                <p>Ek vishay chunein, ya apni pareshani seedhe likhein.</p>
+                <span className="assistant-eyebrow">GRAMIN-MITRA AAPKE SAATH</span>
+                <h2>Kheti ka sawal? Yahin poochhein.</h2>
+                <p>
+                  Fasal, kheti ke tareeke ya sarkari yojana—saral jawab paayein.
+                </p>
               </div>
               <span className="assistant-intro-icon" aria-hidden="true">✍️</span>
             </div>
-            <div className="presets">
-              <span className="presets-label">Jaldi shuru karein</span>
-              <div className="chip-list">
-                {PRESETS?.map((preset) => (
-                  <button
-                    className="preset-chip"
-                    key={preset.label}
-                    type="button"
-                    onClick={() => {
-                      setPrompt(preset.prompt);
-                      setError("");
-                    }}
-                  >
-                    {preset.label}
-                  </button>
-                )) || []}
-              </div>
+
+            <div className="custom-key-field">
+              <label htmlFor="custom-api-key">
+                🔑 Evaluation / API Key Settings (For Judges &amp; Devs)
+                <span>Optional · blank uses the secure server key</span>
+              </label>
+              <input
+                id="custom-api-key"
+                type="password"
+                autoComplete="off"
+                spellCheck="false"
+                value={apiKey}
+                onChange={(event) => {
+                  const nextApiKey = event.target.value;
+                  setApiKey(nextApiKey);
+                  try {
+                    if (nextApiKey) {
+                      window.localStorage?.setItem("GEMINI_API_KEY", nextApiKey);
+                    } else {
+                      window.localStorage?.removeItem("GEMINI_API_KEY");
+                    }
+                  } catch (storageError) {
+                    console.warn("Could not save the custom API key on this device.", storageError);
+                  }
+                }}
+                placeholder="Apni custom Google AI Studio API Key enter karein ya default use hone dein..."
+                aria-describedby="custom-api-key-hint"
+                disabled={loading}
+              />
+              <span id="custom-api-key-hint">
+                Custom key is device par save hogi aur request ke samay secure server ko bheji jayegi.
+              </span>
             </div>
 
             <form className="query-form" onSubmit={handleAsk}>
               <label className="field-label" htmlFor="farmer-question">
-                Aapka sawal
+                <span>Aapka sawal</span>
               </label>
+              <div className="language-row">
+                <label htmlFor="response-language">Jawab ki bhasha</label>
+                <select
+                  id="response-language"
+                  value={responseLanguage}
+                  onChange={(event) => setResponseLanguage(event.target.value)}
+                  disabled={loading}
+                >
+                  {RESPONSE_LANGUAGES.map((language) => (
+                    <option key={language} value={language}>{language}</option>
+                  ))}
+                </select>
+              </div>
               <div className="textarea-wrap">
                 <textarea
                   id="farmer-question"
                   rows={4}
                   maxLength={2000}
                   value={prompt}
+                  aria-describedby="prompt-char-count"
                   onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="Jaise: meri dhaan ki fasal ke patte peele ho rahe hain—main kya karun?"
+                  placeholder="Jaise: Dhaan ke patte peele pad rahe hain—kya karun?"
                   disabled={loading}
                   required
                 />
-                <span className="character-count">{prompt.length}/2000</span>
+                <button
+                  className={`mic-button${isListening ? " is-listening" : ""}`}
+                  type="button"
+                  onClick={toggleVoiceInput}
+                  disabled={loading}
+                  aria-label={isListening ? "Voice typing band karein" : "Boli se sawal likhein"}
+                  aria-pressed={isListening}
+                  title={isListening ? "Sun raha hai — band karne ke liye dabayein" : "Boli se sawal likhein"}
+                >
+                  {isListening ? "⏹️ Rokein" : "🎙️ Mic se bolein"}
+                </button>
+                <span className="character-count" id="prompt-char-count">{prompt.length}/2000</span>
               </div>
+              {voiceError && <p className="voice-error" role="status">{voiceError}</p>}
               <div className="form-footer">
                 <p className="form-note">
-                  <span aria-hidden="true">🔒</span> Aapka sawal surakshit server
-                  ke zariye AI tak jayega.
+                  <span aria-hidden="true">🔒</span> Aapka sawal surakshit server se bheja jaata hai.
                 </p>
                 <button
                   className="submit-button"
@@ -581,17 +829,34 @@ function GraminMitraApp() {
                   {loading ? (
                     <>
                       <span className="spinner" aria-hidden="true" />
-                      Samadhan dhoondh rahe hain...
+                      Aapke sawal par kaam ho raha hai...
                     </>
                   ) : (
-                    "Samadhan Prapt Karein (Ask AI) 🚜"
+                    <>Salah paayein <span aria-hidden="true">↗</span></>
                   )}
                 </button>
               </div>
-              <p className="inline-hint">
-                <span aria-hidden="true">✦</span> Aap jitni jaankari denge, salah
-                utni hi upyogi hogi. Bhejne se pehle apna sawal zaroor jaanch lein.
-              </p>
+              <div className="presets">
+                <span className="presets-label">Shuru karne ke liye vishay chunein</span>
+                <div className="chip-list">
+                  {PRESETS?.map((preset) => (
+                    <button
+                      className="preset-chip"
+                      key={preset.label}
+                      type="button"
+                      onClick={() => {
+                        setPrompt(preset.prompt);
+                        setError("");
+                        document.getElementById("farmer-question")?.focus({
+                          preventScroll: true,
+                        });
+                      }}
+                    >
+                      {preset.label}
+                    </button>
+                  )) || []}
+                </div>
+              </div>
             </form>
 
             {error && (
@@ -611,24 +876,137 @@ function GraminMitraApp() {
             !error && (
               <div className="empty-state">
                 <span className="empty-icon" aria-hidden="true">🌱</span>
-                <p>Aapka samadhan yahan dikhega</p>
-                <span>Apna sawal likhein ya upar se koi vishay chunein.</span>
+                <p>Aapka jawab yahan milega</p>
+                <span>Apna sawal likhein ya koi topic chunein—AI aapke kehne par hi chalega.</span>
               </div>
             )
           )}
 
-          <p
-            style={{
-              margin: "20px 0 0",
-              color: "#789888",
-              fontSize: 11,
-              lineHeight: 1.6,
-              textAlign: "center",
-            }}
-          >
-            🔒 AI connection is protected by Gramin-Mitra’s secure server.
-          </p>
         </div>
+
+        <section className="safety-section" aria-labelledby="safety-title">
+          <div className="safety-icon" aria-hidden="true">🤝</div>
+          <div>
+            <span className="section-kicker">ZIMMEDAAR SALAH</span>
+            <h2 id="safety-title">AI se madad lein, zaroori faisla jaanch kar karein.</h2>
+            <p>AI ki salah galat ya adhuri ho sakti hai. Dawa, fasal ya yojana se juda kadam uthane se pehle krishi visheshagya ya adhikarik sarkari srot se tasdeek karein.</p>
+          </div>
+          <a href="tel:18001801551" aria-label="Kisan Call Center ko 1800-180-1551 par call karein">
+            📞 Kisan Call Center <strong>1800-180-1551</strong>
+          </a>
+        </section>
+
+        <section className="value-strip" aria-label="Gramin-Mitra ke fayde">
+          <div><span className="value-strip-icon">🌾</span><span><strong>Kheti par kendrit</strong><small>Roz ke kheti sawalon ke liye</small></span></div>
+          <div><span className="value-strip-icon">💬</span><span><strong>Saral Hinglish</strong><small>Samajhne aur apnane layak</small></span></div>
+          <div><span className="value-strip-icon">🛡️</span><span><strong>Surakshit connection</strong><small>API key server par surakshit</small></span></div>
+          <div><span className="value-strip-icon">🌍</span><span><strong>Open architecture</strong><small>Gemma-powered, adaptable design</small></span></div>
+        </section>
+
+        <section className="info-section help-section" id="madad">
+          <div className="section-heading">
+            <span className="section-kicker">JAMEEN SE JUDE SAWAL</span>
+            <h2>Jab zaroorat ho, <em>kaam ki baat.</em></h2>
+            <p>Gramin-Mitra kheti aur kisan sahayata ke aam sawalon ko seedhi Hinglish mein samjhane ke liye bana hai.</p>
+          </div>
+          <div className="help-grid">
+            <article className="help-card help-card-crop">
+              <div className="help-card-image">
+                <img
+                  src="https://images.unsplash.com/photo-1499529112087-3cb3b73cec95?auto=format&fit=crop&w=900&q=80"
+                  alt="Fasal ke beech kheti ka manzar"
+                  loading="lazy"
+                />
+                <span className="help-card-number">01</span>
+              </div>
+              <div className="help-card-copy">
+                <span className="help-card-icon">🔍</span>
+                <h3>Fasal ki pehchan</h3>
+                <p>Patton ke rang, daag ya fasal ki badhotri ke baare mein batayein. AI mumkin samasya aur agle kadam saral shabdon mein samjhata hai.</p>
+                <button type="button" onClick={() => selectQuestion(PRESETS[0]?.prompt || "")}>Fasal ka sawal poochhein <span aria-hidden="true">↗</span></button>
+              </div>
+            </article>
+            <article className="help-card help-card-remedy">
+              <div className="help-card-image">
+                <img
+                  src="https://images.unsplash.com/photo-1416879595882-3373a0480b5b?auto=format&fit=crop&w=900&q=80"
+                  alt="Paudhon aur mitti ki dekhbhal"
+                  loading="lazy"
+                />
+                <span className="help-card-number">02</span>
+              </div>
+              <div className="help-card-copy">
+                <span className="help-card-icon">🌿</span>
+                <h3>Saste desi upchaar</h3>
+                <p>Kam kharch aur jaivik vikalpon ke baare mein poochhein. Salah mein suraksha aur zaroorat par sthaniya visheshagya se jaanch ko ahmiyat di jaati hai.</p>
+                <button type="button" onClick={() => selectQuestion(PRESETS[2]?.prompt || "")}>Upchaar ke baare mein poochhein <span aria-hidden="true">↗</span></button>
+              </div>
+            </article>
+            <article className="help-card help-card-scheme">
+              <div className="help-card-image">
+                <img
+                  src="https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=900&q=80"
+                  alt="Kisan apne khet mein kaam karte hue"
+                  loading="lazy"
+                />
+                <span className="help-card-number">03</span>
+              </div>
+              <div className="help-card-copy">
+                <span className="help-card-icon">🏛️</span>
+                <h3>Yojana aur sahayata</h3>
+                <p>PM-Kisan, KCC aur Fasal Bima jaise vishayon par aasan jaankari paayein—aur zaroori details adhikarik sroton se verify karein.</p>
+                <button type="button" onClick={() => selectQuestion(PRESETS[1]?.prompt || "")}>Yojana ke baare mein poochhein <span aria-hidden="true">↗</span></button>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section className="how-section" id="kaise-kaam-karta-hai">
+          <div className="how-copy how-heading">
+            <span className="section-kicker">TEEN AASAN KADAM</span>
+            <h2>Sawal se salah tak,<br /><em>bas teen seedhe kadam.</em></h2>
+            <p>Apni boli mein batayein. Koi technical shabd ya khaas jaankari zaroori nahi.</p>
+          </div>
+          <div className="how-steps">
+            <article>
+              <div className="step-card-top"><span className="step-index">01</span><span className="step-icon" aria-hidden="true">✍️</span></div>
+              <div><h3>Apni dikkat batayein</h3><p>Fasal, samasya ya yojana ka sawal apne shabdon mein likhein.</p></div>
+            </article>
+            <article>
+              <div className="step-card-top"><span className="step-index">02</span><span className="step-icon" aria-hidden="true">👀</span></div>
+              <div><h3>Sawal padh kar bhejein</h3><p>Jawab mangne se pehle sawal ko dekhein, zaroorat ho to badlein.</p></div>
+            </article>
+            <article>
+              <div className="step-card-top"><span className="step-index">03</span><span className="step-icon" aria-hidden="true">🌱</span></div>
+              <div><h3>Kaam ki salah paayein</h3><p>Pehchan, upchaar aur yojana ki jaankari saaf hisson mein dekhein.</p></div>
+            </article>
+          </div>
+        </section>
+
+        <section className="technology-section" id="technology">
+          <div className="technology-photo">
+            <img
+              src="https://images.unsplash.com/photo-1523348837708-15d4a09cfac2?auto=format&fit=crop&w=1200&q=80"
+              alt="Khet mein kheti ke liye technology ka upyog"
+              loading="lazy"
+            />
+            <div className="technology-photo-overlay">
+              <span className="technology-live-dot" />
+              <span>OPEN AI · KISANON KE LIYE</span>
+            </div>
+          </div>
+          <div className="technology-copy">
+            <span className="section-kicker">TECHNOLOGY WITH A PURPOSE</span>
+            <h2>Khuli AI soch.<br /><em>Asli zindagi ke sawal.</em></h2>
+            <p>Gramin-Mitra Google Gemma open architecture se prerit hai. Aaj ka demo secure server ke through hosted Gemini/Gemma models se jawab leta hai.</p>
+            <div className="technology-points">
+              <div><span>01</span><p><strong>Gemma-first approach</strong><small>Open model ecosystem ko rural advisory ke saath jodne ka prayas.</small></p></div>
+              <div><span>02</span><p><strong>Server-side API security</strong><small>Provider key browser bundle ya farmer ke device mein nahi rakhi jaati.</small></p></div>
+              <div><span>03</span><p><strong>Local deployment ke liye bana adaptable design</strong><small>Ollama / llama.cpp integration future deployment ka raasta hai—offline mode abhi enabled nahi hai.</small></p></div>
+            </div>
+          </div>
+        </section>
+
       </main>
 
       <footer className="site-footer">
