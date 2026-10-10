@@ -57,7 +57,19 @@ async function generateAnswer(model, prompt, language, apiKey) {
 
   const data = await response.json().catch(() => null);
   if (!response.ok || data?.error) {
-    throw new Error(data?.error?.message || `Google AI API error (${response.status}).`);
+    const providerMessage =
+      data?.error?.message || `Google AI API error (${response.status}).`;
+    if (
+      response.status === 400 &&
+      /api key not valid|api_key_invalid|invalid api key/i.test(providerMessage)
+    ) {
+      const error = new Error(
+        "Google AI Studio API key invalid ya disabled hai. Nayi active key paste karein, ya custom key field khaali karke server key use karein.",
+      );
+      error.code = "INVALID_API_KEY";
+      throw error;
+    }
+    throw new Error(providerMessage);
   }
 
   const answer = data?.candidates?.[0]?.content?.parts
@@ -122,6 +134,9 @@ export default async function handler(request, response) {
       return response.status(200).json({ answer });
     } catch (error) {
       console.error(`Gemini model request failed (${model}):`, error.message);
+      if (error.code === "INVALID_API_KEY") {
+        return response.status(401).json({ error: error.message });
+      }
       failures.push({ model, message: error.message });
     }
   }

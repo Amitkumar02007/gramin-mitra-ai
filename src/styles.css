@@ -2808,12 +2808,37 @@ body {
 .custom-key-field input {
   width: 100%;
   min-height: 42px;
-  padding: 9px 12px;
+  padding: 9px 86px 9px 12px;
   border: 1px solid var(--border-color);
   border-radius: 11px;
   background: #fff;
   color: var(--text-main);
   font-size: 13px;
+}
+
+.custom-key-input-wrap {
+  position: relative;
+}
+
+.key-visibility-button {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  min-height: 30px;
+  padding: 0 8px;
+  transform: translateY(-50%);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: #f9fafb;
+  color: #374151;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.key-visibility-button:hover {
+  border-color: #86efac;
+  background: #f0fdf4;
 }
 
 .custom-key-field input::placeholder {

@@ -534,6 +534,7 @@ function SolutionView({ answer }) {
 function GraminMitraApp() {
   const [prompt, setPrompt] = useState("");
   const [apiKey, setApiKey] = useState(getInitialApiKey);
+  const [showApiKey, setShowApiKey] = useState(false);
   const [responseLanguage, setResponseLanguage] = useState(RESPONSE_LANGUAGES[0]);
   const [answer, setAnswer] = useState(null);
   const [error, setError] = useState("");
@@ -746,29 +747,39 @@ function GraminMitraApp() {
                 🔑 Evaluation / API Key Settings (For Judges &amp; Devs)
                 <span>Optional · blank uses the secure server key</span>
               </label>
-              <input
-                id="custom-api-key"
-                type="password"
-                autoComplete="off"
-                spellCheck="false"
-                value={apiKey}
-                onChange={(event) => {
-                  const nextApiKey = event.target.value;
-                  setApiKey(nextApiKey);
-                  try {
-                    if (nextApiKey) {
-                      window.localStorage?.setItem("GEMINI_API_KEY", nextApiKey);
-                    } else {
-                      window.localStorage?.removeItem("GEMINI_API_KEY");
+              <div className="custom-key-input-wrap">
+                <input
+                  id="custom-api-key"
+                  type={showApiKey ? "text" : "password"}
+                  autoComplete="off"
+                  spellCheck="false"
+                  value={apiKey}
+                  onChange={(event) => {
+                    const nextApiKey = event.target.value;
+                    setApiKey(nextApiKey);
+                    try {
+                      if (nextApiKey) {
+                        window.localStorage?.setItem("GEMINI_API_KEY", nextApiKey);
+                      } else {
+                        window.localStorage?.removeItem("GEMINI_API_KEY");
+                      }
+                    } catch (storageError) {
+                      console.warn("Could not save the custom API key on this device.", storageError);
                     }
-                  } catch (storageError) {
-                    console.warn("Could not save the custom API key on this device.", storageError);
-                  }
-                }}
-                placeholder="Apni custom Google AI Studio API Key enter karein ya default use hone dein..."
-                aria-describedby="custom-api-key-hint"
-                disabled={loading}
-              />
+                  }}
+                  placeholder="Apni custom Google AI Studio API Key enter karein ya default use hone dein..."
+                  aria-describedby="custom-api-key-hint"
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  className="key-visibility-button"
+                  onClick={() => setShowApiKey((visible) => !visible)}
+                  aria-label={showApiKey ? "API key chhupayein" : "API key dikhayein"}
+                >
+                  {showApiKey ? "Chhupayein" : "Dikhayein"}
+                </button>
+              </div>
               <span id="custom-api-key-hint">
                 Custom key is device par save hogi aur request ke samay secure server ko bheji jayegi.
               </span>

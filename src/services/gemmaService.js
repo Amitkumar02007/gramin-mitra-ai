@@ -21,9 +21,12 @@ export async function askGemma({
 
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(
+    const error = new Error(
       data?.error || "AI se jawab nahi mil saka. Kuch der baad dobara koshish karein.",
     );
+    error.code = data?.code || "";
+    error.status = response.status;
+    throw error;
   }
 
   if (typeof data?.answer !== "string" || !data.answer.trim()) {
