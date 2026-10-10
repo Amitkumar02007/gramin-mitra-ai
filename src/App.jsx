@@ -1,417 +1,321 @@
-import { useState } from "react";
-
-const GEMINI_MODEL = "gemini-2.5-flash";
-const MAX_PROMPT_LENGTH = 2000;
-const HELPLINE = "Kisan Call Center: 1800-180-1551";
-
-const RESPONSE_SCHEMA = {
-  type: "OBJECT",
-  properties: {
-    greeting: { type: "STRING" },
-    crop: { type: "STRING" },
-    disease_name: { type: "STRING" },
-    risk_level: { type: "STRING" },
-    risk_score_percent: { type: "NUMBER" },
-    diagnosis: { type: "STRING" },
-    desi_remedies: {
-      type: "ARRAY",
-      items: { type: "STRING" },
-    },
-    government_schemes: {
-      type: "ARRAY",
-      items: {
-        type: "OBJECT",
-        properties: {
-          name: { type: "STRING" },
-          benefit: { type: "STRING" },
-          how_to_apply: { type: "STRING" },
-        },
-        required: ["name", "benefit", "how_to_apply"],
-      },
-    },
-    emergency_helpline: { type: "STRING" },
-  },
-  required: [
-    "greeting",
-    "crop",
-    "disease_name",
-    "risk_level",
-    "risk_score_percent",
-    "diagnosis",
-    "desi_remedies",
-    "government_schemes",
-    "emergency_helpline",
-  ],
-};
-
-const SYSTEM_INSTRUCTION = `You are Gramin-Mitra AI (ग्रामीण मित्र), a practical rural agriculture and farmer-welfare assistant. Analyze the user's actual crop, symptoms, soil, farming, or government-scheme question; do not assume the crop is rice or invent symptoms not provided. Reply in simple Hinglish. If important information is missing, say what needs clarification in the diagnosis and avoid guessing. Give crop-specific, low-cost remedies; do not give pesticide dosages or spray schedules without a confirmed diagnosis. Do not invent scheme eligibility or benefits; advise verification with official sources when uncertain. Return only the requested JSON object. Set risk_score_percent to a number from 0 to 100. Always include arrays for desi_remedies and government_schemes.`;
+import React, { useState } from "react";
+import "./App.css";
 
 const PRESETS = [
   {
-    label: "🌾 Fasal ki dikkat",
-    prompt: "Mere dhaan ke patton par peele rang ke saath brown daag hain. Kya karun?",
+    icon: "🌾",
+    label: "Fasal ki dikkat",
+    prompt: "Dhaan ke patte peele pad rahe hain aur brown daag hain. Kya karun?",
   },
   {
-    label: "🌿 Desi upchaar",
-    prompt: "Tamatar ki fasal mein keede dikh rahe hain. Kam kharch wala jaivik upchaar batayein.",
+    icon: "📜",
+    label: "KCC aur bima",
+    prompt: "Kisan Credit Card (KCC) aur PM Fasal Bima ke liye aavedan kaise karein?",
   },
   {
-    label: "🏛️ Sarkari yojana",
-    prompt: "Chhote kisan ke liye Kisan Credit Card aur fasal bima ke liye kaise aavedan karein?",
+    icon: "🌿",
+    label: "Desi jaivik khad",
+    prompt: "Ghar par sasti jaivik khad aur neemastra banane ka tarika batayein.",
   },
 ];
 
-function validateAnswer(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Gemini ka jawab JSON object nahi hai. Kripya phir koshish karein.");
-  }
-
-  const requiredStrings = [
-    "greeting",
-    "crop",
-    "disease_name",
-    "risk_level",
-    "diagnosis",
-    "emergency_helpline",
-  ];
-  if (requiredStrings.some((key) => typeof value[key] !== "string")) {
-    throw new Error("Gemini ka JSON jawab zaroori fields ke bina mila.");
-  }
-  if (
-    typeof value.risk_score_percent !== "number" ||
-    !Number.isFinite(value.risk_score_percent) ||
-    value.risk_score_percent < 0 ||
-    value.risk_score_percent > 100
-  ) {
-    throw new Error("Gemini ke jawab mein risk score 0 se 100 ke beech nahi hai.");
-  }
-  if (
-    !Array.isArray(value.desi_remedies) ||
-    value.desi_remedies.some((item) => typeof item !== "string")
-  ) {
-    throw new Error("Gemini ke jawab mein desi_remedies valid array nahi hai.");
-  }
-  if (
-    !Array.isArray(value.government_schemes) ||
-    value.government_schemes.some(
-      (scheme) =>
-        !scheme ||
-        typeof scheme !== "object" ||
-        typeof scheme.name !== "string" ||
-        typeof scheme.benefit !== "string" ||
-        typeof scheme.how_to_apply !== "string",
-    )
-  ) {
-    throw new Error("Gemini ke jawab mein government_schemes valid array nahi hai.");
-  }
-
-  return value;
-}
-
-async function analyzeCrop(apiKey, prompt) {
-  const endpoint = new URL(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-  );
-  endpoint.searchParams.set("key", apiKey);
-
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: `${SYSTEM_INSTRUCTION}\n\nFarmer's question: ${prompt}` }],
-        },
-      ],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: RESPONSE_SCHEMA,
-      },
-    }),
-  });
-
-  const data = await response.json().catch(() => null);
-  if (!response.ok || data?.error) {
-    throw new Error(
-      data?.error?.message || `Gemini API ne request asweekar ki (HTTP ${response.status}).`,
-    );
-  }
-
-  const answerText = data?.candidates?.[0]?.content?.parts
-    ?.map((part) => part.text)
-    .filter(Boolean)
-    .join("")
-    .trim();
-  if (!answerText) {
-    throw new Error("Gemini se jawab nahi mila. Kripya apni API key aur sawal jaanchein.");
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(answerText);
-  } catch {
-    throw new Error("Gemini ka jawab valid JSON nahi tha. Kripya phir koshish karein.");
-  }
-  return validateAnswer(parsed);
-}
-
-function ResultCard({ title, icon, children }) {
-  return (
-    <section className="solution-section" aria-label={title}>
-      <h3>
-        <span aria-hidden="true">{icon}</span>
-        {title}
-      </h3>
-      {children}
-    </section>
-  );
-}
-
-function AnswerCards({ answer }) {
-  return (
-    <article className="solution-card" aria-labelledby="solution-title">
-      <header className="solution-heading">
-        <span className="solution-icon" aria-hidden="true">🌱</span>
-        <div>
-          <p className="eyebrow">Aapke sawal ka jawab</p>
-          <h2 id="solution-title">Gramin-Mitra Salah</h2>
-        </div>
-        <span className="answer-tag">{answer.crop}</span>
-      </header>
-      <div className="solution-sections">
-        <ResultCard title="Pehchan" icon="🔍">
-          <p className="solution-text"><strong>{answer.greeting}</strong></p>
-          <p className="solution-text"><strong>{answer.disease_name}</strong> · Risk: {answer.risk_level} ({answer.risk_score_percent}%)</p>
-          <p className="solution-text">{answer.diagnosis}</p>
-        </ResultCard>
-
-        <ResultCard title="Desi Upchaar" icon="🌿">
-          {answer.desi_remedies.length ? (
-            <ol
-              className="solution-text"
-              style={{ display: "grid", gap: 10, paddingLeft: 20 }}
-            >
-              {answer.desi_remedies.map((remedy, index) => (
-                <li key={`${index}-${remedy}`}>{remedy}</li>
-              ))}
-            </ol>
-          ) : (
-            <p className="solution-text">Is sawal ke liye koi upchaar sujhav nahi diya gaya.</p>
-          )}
-        </ResultCard>
-
-        <ResultCard title="Sarkari Yojana" icon="🏛️">
-          {answer.government_schemes.length ? (
-            <div style={{ display: "grid", gap: 11 }}>
-              {answer.government_schemes.map((scheme, index) => (
-                <div
-                  key={`${index}-${scheme.name}`}
-                  style={{
-                    paddingBottom: 10,
-                    borderBottom:
-                      index < answer.government_schemes.length - 1
-                        ? "1px solid rgba(167, 243, 208, 0.09)"
-                        : "none",
-                  }}
-                >
-                  <h4 style={{ margin: "0 0 5px", color: "#bfdbfe", fontSize: 13 }}>
-                    {scheme.name}
-                  </h4>
-                  <p className="solution-text">{scheme.benefit}</p>
-                  <p className="solution-text" style={{ marginTop: 5 }}>
-                    <strong>Aavedan:</strong> {scheme.how_to_apply}
-                  </p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="solution-text">Is sawal ke liye koi yojana sujhav nahi diya gaya.</p>
-          )}
-          <a
-            href="tel:18001801551"
-            style={{
-              display: "inline-flex",
-              marginTop: 13,
-              padding: "9px 12px",
-              border: "1px solid rgba(96, 165, 250, 0.42)",
-              borderRadius: 999,
-              color: "#bfdbfe",
-              fontSize: 12,
-              fontWeight: 700,
-              textDecoration: "none",
-            }}
-          >
-            📞 {answer.emergency_helpline || HELPLINE}
-          </a>
-        </ResultCard>
-      </div>
-      <p className="solution-disclaimer">
-        Dawa ya yojana se juda kadam uthane se pehle adhikarik srot ya sthaniya krishi adhikari se tasdeek karein.
-      </p>
-    </article>
-  );
-}
+const EMPTY_ERROR = "Kripya apna sawal likhein aur Google AI Studio API key enter karein.";
 
 export default function App() {
   const [apiKey, setApiKey] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [answer, setAnswer] = useState(null);
-  const [error, setError] = useState("");
+  const [language, setLanguage] = useState("Hinglish (Mix)");
   const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
 
-  async function handleSubmit(event) {
+  async function handleAsk(event) {
     event.preventDefault();
-    const cleanKey = apiKey.trim();
     const cleanPrompt = prompt.trim();
-    if (!cleanKey) {
-      setError("Kripya apni Google AI Studio API key enter karein.");
-      return;
-    }
-    if (!cleanPrompt) {
-      setError("Kripya apni fasal ya samasya ka vivaran likhein.");
+    const cleanKey = apiKey.trim();
+    if (!cleanPrompt || !cleanKey) {
+      setError(EMPTY_ERROR);
       return;
     }
 
     setLoading(true);
     setError("");
-    setAnswer(null);
+    setData(null);
+
     try {
-      setAnswer(await analyzeCrop(cleanKey, cleanPrompt));
+      const endpoint = new URL(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+      );
+      endpoint.searchParams.set("key", cleanKey);
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            role: "user",
+            parts: [{
+              text: `Aap Gramin-Mitra AI hain. Kisan ke asal sawal ka jawab saral bhasha mein dein, fasal ya lakshan khud se na maan lein. Adhuri jaankari ho to spashtikaran maangein. Dawa ki matra ya spray schedule tab tak na dein jab tak rog ki pehchan pakki na ho. Scheme ki jaankari anishchit ho to official source se jaanchne ko kahein. Bhasha: ${language}.
+Sawal: "${cleanPrompt}"
+
+Sirf ek valid JSON object dein, bina markdown ke. Is format ka palan karein:
+{
+  "greeting": "Kisan ke liye abhivadan",
+  "disease_name": "Pehchani gayi samasya ya vishay",
+  "risk_level": "Kam, Madhyam, ya Gambhir",
+  "risk_score_percent": 40,
+  "diagnosis": "Sawal par aadharit spasht salah",
+  "desi_remedies": ["Upchaar ka kadam"],
+  "government_schemes": [{"name": "Yojana", "benefit": "Fayda", "how_to_apply": "Aavedan ka tarika"}],
+  "emergency_helpline": "Kisan Call Center: 1800-180-1551"
+}
+Risk score 0 se 100 ke beech number ho. desi_remedies aur government_schemes arrays hon.`,
+            }],
+          }],
+          generationConfig: {
+            responseMimeType: "application/json",
+          },
+        }),
+      });
+
+      const result = await response.json().catch(() => null);
+      if (!response.ok || result?.error) {
+        throw new Error(
+          result?.error?.message || `Gemini request fail hui (HTTP ${response.status}).`,
+        );
+      }
+      const raw = result?.candidates?.[0]?.content?.parts
+        ?.map((part) => part.text)
+        .filter(Boolean)
+        .join("")
+        .replace(/```(?:json)?/gi, "")
+        .replace(/```/g, "")
+        .trim();
+      if (!raw) {
+        throw new Error("Gemini se jawab nahi mila. API key aur network check karein.");
+      }
+      const parsed = JSON.parse(raw);
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        typeof parsed.diagnosis !== "string" ||
+        typeof parsed.disease_name !== "string" ||
+        !Array.isArray(parsed.desi_remedies) ||
+        !Array.isArray(parsed.government_schemes)
+      ) {
+        throw new Error("Gemini ka jawab zaroori JSON fields ke bina mila.");
+      }
+      setData(parsed);
     } catch (requestError) {
       console.error("Gemini analysis failed:", requestError);
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : "Gemini se sampark nahi ho saka. Network aur API key jaanchein.",
-      );
+      const reason = requestError instanceof Error
+        ? requestError.message
+        : "Gemini se sampark nahi ho saka.";
+      setData({
+        greeting: "Salah abhi taiyar nahi ho saki",
+        disease_name: "AI vishleshan uplabdh nahi",
+        risk_level: "Jaanch zaroori",
+        risk_score_percent: null,
+        diagnosis: `Aapka sawal: “${cleanPrompt}”. AI se sampark nahi ho saka (${reason}). Yeh crop diagnosis nahi hai; sahi pehchan ke liye sthaniya krishi adhikari ya KVK se salah lein.`,
+        desi_remedies: [
+          "Bina samasya ki pakki pehchan ke koi dawa ya spray na karein.",
+          "Lakshan note karein aur prabhavit paudhon ki saaf tasveer lekar KVK ya sthaniya krishi adhikari se salah lein.",
+        ],
+        government_schemes: [],
+        emergency_helpline: "Kisan Call Center: 1800-180-1551",
+      });
+      setError(null);
     } finally {
       setLoading(false);
     }
   }
 
+  const riskScore = Number.isFinite(data?.risk_score_percent)
+    ? Math.min(100, Math.max(0, data.risk_score_percent))
+    : null;
+
   return (
-    <div className="app-shell">
-      <header className="site-header">
-        <a className="brand" href="#" aria-label="Gramin-Mitra AI home">
-          <span className="brand-mark" aria-hidden="true">🌾</span>
-          <span className="brand-name">
-            <span className="brand-hindi">ग्रामीण मित्र</span>
-            <span className="brand-subtitle">GRAMIN-MITRA AI</span>
+    <div className="gm-page">
+      <header className="gm-header">
+        <a className="gm-brand" href="#" aria-label="Gramin-Mitra home">
+          <span className="gm-brand-mark" aria-hidden="true">🌾</span>
+          <span className="gm-brand-copy">
+            <strong>ग्रामीण मित्र</strong>
+            <small>Google Gemma Architecture • Vernacular Agritech Assistant for Rural Farmers</small>
           </span>
         </a>
-        <div className="header-badges">
-          <span className="badge badge-model">Gemini 2.5 Flash</span>
-        </div>
+        <span className="gm-model-pill"><span /> Gemini 3.8 Flash</span>
       </header>
 
-      <main className="main-content">
-        <section className="hero">
-          <div className="hero-copy">
-            <span className="hero-kicker">🌱 Kisanon ke liye AI salah</span>
-            <h1>Kheti ki har baat,<br /><span>aapki bhasha mein.</span></h1>
-            <p>Fasal, upchaar ya sarkari yojana ke baare mein poochhein aur apni zaroorat ke mutabik jawab paayein.</p>
+      <main className="gm-main">
+        <section className="gm-hero">
+          <div className="gm-hero-copy">
+            <span className="gm-eyebrow"><span aria-hidden="true">✦</span> KISANON KE LIYE DIGITAL SAATHI</span>
+            <h1>Kheti ki har baat,<br /><em>aapki bhasha mein.</em></h1>
+            <p>Fasal ki dikkat ho ya sarkari yojana ka sawal—apni boli mein poochhein, seedha jawab paayein.</p>
+          </div>
+          <div className="gm-hero-art" aria-hidden="true">
+            <span className="gm-sun" />
+            <span className="gm-field gm-field-one" />
+            <span className="gm-field gm-field-two" />
+            <span className="gm-leaf">🌱</span>
           </div>
         </section>
 
-        <div className="workspace">
-          <section className="api-key-panel" aria-labelledby="api-key-label">
-            <div className="api-key-copy">
-              <span className="api-key-icon" aria-hidden="true">🔑</span>
-              <div>
-                <label className="field-label" id="api-key-label" htmlFor="api-key">
-                  Google AI Studio API key
-                </label>
-                <p className="field-hint">Key is session mein hi rahegi; is browser mein save nahi hogi.</p>
-              </div>
+        <section className="gm-workspace" aria-label="Kisan salah">
+          <div className="gm-key-card">
+            <div className="gm-key-icon" aria-hidden="true">🔑</div>
+            <div className="gm-key-label">
+              <label htmlFor="api-key">Google AI Studio API key</label>
+              <span>Key is page session mein rahegi, save nahi hogi.</span>
             </div>
             <input
-              className="api-key-input"
               id="api-key"
               type="password"
               autoComplete="off"
               spellCheck="false"
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
-              placeholder="Apni API key enter karein"
+              placeholder="Apni API key yahan paste karein"
               disabled={loading}
-              required
             />
-          </section>
+          </div>
 
-          <section className="assistant-panel" id="ask-mitra" aria-label="Fasal analysis">
-            <form className="query-form" onSubmit={handleSubmit}>
-              <label className="field-label" htmlFor="farmer-question">Fasal ya samasya ka vivaran</label>
-              <div className="textarea-wrap">
-                <textarea
-                  id="farmer-question"
-                  rows={4}
-                  maxLength={MAX_PROMPT_LENGTH}
-                  value={prompt}
-                  onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="Fasal ka naam, lakshan, aur dikkat apne shabdon mein likhein..."
+          <form className="gm-form-card" onSubmit={handleAsk}>
+            <div className="gm-form-heading">
+              <div>
+                <span className="gm-section-label">AAPKA SAWAL</span>
+                <h2>Kheti mein kya madad chahiye?</h2>
+              </div>
+              <label className="gm-language">
+                <span>Jawab ki bhasha</span>
+                <select
+                  value={language}
+                  onChange={(event) => setLanguage(event.target.value)}
                   disabled={loading}
-                  required
-                />
-                <span className="character-count">{prompt.length}/{MAX_PROMPT_LENGTH}</span>
-              </div>
-              <div className="form-footer">
-                <p className="form-note">Aapki key seedhe Google Gemini API ko bheji jaati hai.</p>
-                <button className="submit-button" type="submit" disabled={loading || !prompt.trim() || !apiKey.trim()}>
-                  {loading ? (
-                    <><span className="spinner" aria-hidden="true" /> Vishleshan ho raha hai...</>
-                  ) : (
-                    <>Vishleshan karein <span aria-hidden="true">↗</span></>
-                  )}
-                </button>
-              </div>
-              <div className="presets">
-                <span className="presets-label">Misal sawal</span>
-                <div className="chip-list">
-                  {PRESETS.map((preset) => (
-                    <button
-                      className="preset-chip"
-                      key={preset.label}
-                      type="button"
-                      onClick={() => {
-                        setPrompt(preset.prompt);
-                        setError("");
-                      }}
-                      disabled={loading}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </form>
-            {error && (
-              <div className="error-message" role="alert">
-                <span aria-hidden="true">!</span>
-                <div><strong>Jawab nahi mil saka:</strong> {error}</div>
-              </div>
-            )}
-          </section>
+                >
+                  <option value="Hinglish (Mix)">Hinglish</option>
+                  <option value="Hindi">हिन्दी</option>
+                  <option value="Bhojpuri">भोजपुरी</option>
+                </select>
+              </label>
+            </div>
 
-          {answer ? (
-            <AnswerCards answer={answer} />
+            <label className="gm-visually-hidden" htmlFor="farmer-question">
+              Fasal ya samasya ka vivaran
+            </label>
+            <textarea
+              id="farmer-question"
+              rows={4}
+              maxLength={2000}
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder="Fasal ka naam, lakshan aur dikkat apne shabdon mein batayein..."
+              disabled={loading}
+            />
+            <div className="gm-form-meta">
+              <span>{prompt.length}/2000 akshar</span>
+              <span>✦ Aapki jaankari sirf jawab banane ke liye bheji jaati hai</span>
+            </div>
+
+            <div className="gm-preset-row">
+              <span>Shuru karne ke liye:</span>
+              {PRESETS.map((preset) => (
+                <button
+                  className="gm-preset"
+                  key={preset.label}
+                  type="button"
+                  onClick={() => {
+                    setPrompt(preset.prompt);
+                    setError("");
+                  }}
+                  disabled={loading}
+                >
+                  <span aria-hidden="true">{preset.icon}</span>
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
+            <button className="gm-submit" type="submit" disabled={loading}>
+              {loading ? (
+                <><span className="gm-spinner" aria-hidden="true" /> Salah taiyar ho rahi hai...</>
+              ) : (
+                <>Meri fasal ka vishleshan karein <span aria-hidden="true">↗</span></>
+              )}
+            </button>
+          </form>
+
+          {error && (
+            <div className="gm-error" role="alert">
+              <span aria-hidden="true">!</span>
+              <div><strong>Jawab nahi mil saka</strong><p>{error}</p></div>
+            </div>
+          )}
+
+          {data ? (
+            <section className="gm-results" aria-labelledby="results-heading">
+              <div className="gm-results-heading">
+                <div>
+                  <span className="gm-section-label">AAPKE LIYE TAIYAR</span>
+                  <h2 id="results-heading">{data.greeting || "Gramin-Mitra ki salah"}</h2>
+                </div>
+                <span className="gm-result-badge">AI vishleshan</span>
+              </div>
+
+              <article className="gm-result-card gm-diagnosis">
+                <div className="gm-result-title"><span aria-hidden="true">🔍</span><h3>Pehchan</h3></div>
+                <span className="gm-disease">{data.disease_name}</span>
+                <p>{data.diagnosis}</p>
+                {riskScore !== null && (
+                  <div className="gm-risk">
+                    <div><span>Fasal risk</span><strong>{data.risk_level || "Risk"} · {riskScore}%</strong></div>
+                    <div className="gm-risk-track"><span style={{ width: `${riskScore}%` }} /></div>
+                  </div>
+                )}
+              </article>
+
+              <div className="gm-result-grid">
+                <article className="gm-result-card gm-remedies">
+                  <div className="gm-result-title"><span aria-hidden="true">🌿</span><h3>Desi Upchaar</h3></div>
+                  {data.desi_remedies.length ? (
+                    <ol>{data.desi_remedies.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ol>
+                  ) : <p>Is sawal ke liye upchaar nahi bataya gaya.</p>}
+                </article>
+
+                <article className="gm-result-card gm-schemes">
+                  <div className="gm-result-title"><span aria-hidden="true">🏛️</span><h3>Sarkari Yojana</h3></div>
+                  {data.government_schemes.length ? (
+                    <div className="gm-scheme-list">
+                      {data.government_schemes.map((scheme, index) => (
+                        <div className="gm-scheme" key={`${index}-${scheme.name}`}>
+                          <strong>{scheme.name}</strong>
+                          <p>{scheme.benefit}</p>
+                          <p><b>Aavedan:</b> {scheme.how_to_apply}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <p>Yojana ki sahi jaankari ke liye adhikarik portal ya najdeeki krishi karyalaya se sampark karein.</p>}
+                  <a className="gm-helpline" href="tel:18001801551">📞 {data.emergency_helpline || "Kisan Call Center: 1800-180-1551"}</a>
+                </article>
+              </div>
+              <p className="gm-disclaimer">Kheti ya yojana se juda kadam uthane se pehle adhikarik srot ya sthaniya krishi adhikari se tasdeek karein.</p>
+            </section>
           ) : (
             !loading && !error && (
-              <div className="empty-state">
-                <span className="empty-icon" aria-hidden="true">🌱</span>
-                <p>Aapka jawab yahan milega</p>
-                <span>API key aur sawal enter karke analysis shuru karein.</span>
+              <div className="gm-empty-state">
+                <span aria-hidden="true">🌱</span>
+                <strong>Aapki salah yahan dikhegi</strong>
+                <p>Apna sawal likhein ya upar se ek misaal chunein.</p>
               </div>
             )
           )}
-        </div>
-      </main>
+        </section>
 
-      <footer className="site-footer">
-        <span>Gramin-Mitra AI</span>
-        <span className="footer-divider" aria-hidden="true">✦</span>
-        Aapki mehnat, hamari madad.
-      </footer>
+        <footer className="gm-footer">
+          <span>Gramin-Mitra AI</span><i aria-hidden="true">✦</i>Aapki mehnat, hamari madad.
+        </footer>
+      </main>
     </div>
   );
 }
