@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { askGemma } from "./services/gemmaService.js";
 
 const DEFAULT_HELPLINE = "Kisan Call Center: 1800-180-1551";
@@ -20,25 +20,6 @@ const PRESETS = [
       "Ghar par sasti neem aur gobar ki jaivik khad banane ka aasan tarika kya hai?",
   },
 ];
-
-const getInitialApiKey = () => {
-  try {
-    if (typeof window !== "undefined" && window.localStorage) {
-      const saved = window.localStorage.getItem("GEMINI_API_KEY");
-      if (saved) return saved;
-    }
-    if (
-      typeof import.meta !== "undefined" &&
-      import.meta.env &&
-      import.meta.env.VITE_GEMINI_API_KEY
-    ) {
-      return import.meta.env.VITE_GEMINI_API_KEY;
-    }
-  } catch (error) {
-    console.warn("Could not retrieve the Google AI Studio API key.", error);
-  }
-  return "";
-};
 
 const cardStyles = {
   base: {
@@ -441,42 +422,26 @@ function SolutionView({ answer }) {
 }
 
 function GraminMitraApp() {
-  const [apiKey, setApiKey] = useState(getInitialApiKey);
   const [prompt, setPrompt] = useState("");
   const [answer, setAnswer] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  function handleApiKeyChange(event) {
-    const value = event.target.value;
-    setApiKey(value);
-
+  useEffect(() => {
     try {
-      if (value.trim()) {
-        window.localStorage.setItem("GEMINI_API_KEY", value.trim());
-        window.localStorage.removeItem("gramin-mitra-google-ai-api-key");
-      } else {
-        window.localStorage.removeItem("GEMINI_API_KEY");
-        window.localStorage.removeItem("gramin-mitra-google-ai-api-key");
-      }
+      window.localStorage?.removeItem("GEMINI_API_KEY");
+      window.localStorage?.removeItem("gramin-mitra-google-ai-api-key");
     } catch (storageError) {
-      console.warn("Could not save the Google AI Studio API key.", storageError);
+      console.warn("Could not remove the legacy browser-stored API key.", storageError);
     }
-  }
+  }, []);
 
   async function handleAsk(event) {
     event.preventDefault();
     const query = prompt.trim();
-    const effectiveApiKey = apiKey.trim() || getInitialApiKey().trim();
 
     if (!query) {
       setError("Kripya kisan bhai apni samasya likhein ya koi preset chunein.");
-      return;
-    }
-    if (!effectiveApiKey) {
-      setError(
-        "API key uplabdh nahi hai. Developer / Evaluation Settings mein key enter karein.",
-      );
       return;
     }
 
@@ -485,7 +450,7 @@ function GraminMitraApp() {
     setAnswer(null);
 
     try {
-      const result = await askGemma({ prompt: query, apiKey: effectiveApiKey });
+      const result = await askGemma({ prompt: query });
       setAnswer(normalizeAnswer(result));
     } catch (requestError) {
       console.error(requestError);
@@ -522,21 +487,22 @@ function GraminMitraApp() {
           <div className="hero-copy">
             <span className="hero-kicker">
               <span className="status-dot" aria-hidden="true" />
-              Hacktoberfest Ranchi 2026 · Best Use of Gemma 4
+              Kisanon ke liye AI · Gemma 4 Open Architecture
             </span>
             <h1>
-              Kheti ki har samasya ka
+              Har khet ki samajh.
               <br />
-              <span>saathi samadhan.</span>
+              <span>Har kisan ka saathi.</span>
             </h1>
             <p>
-              Fasal ki pareshani, sasta desi upchaar ya sarkari yojana — apna
-              sawal poochhein aur paayen saaf, kaam ki salah.
+              Fasal ki pehchan se sarkari yojana tak—apna sawal apni bhasha mein
+              poochhiye aur paaiye seedhi, samajhne layak salah.
             </p>
-            <p style={{ marginTop: 9, color: "#91aea0", fontSize: 12, lineHeight: 1.6 }}>
-              Gemma 4 open architecture · Edge-ready design compatible with
-              Ollama / llama.cpp for offline rural kiosks.
-            </p>
+            <div className="hero-trust-row" aria-label="Gramin-Mitra features">
+              <span><i aria-hidden="true">✦</i> Saral Hinglish</span>
+              <span><i aria-hidden="true">✦</i> Kaam ke kheti sujhav</span>
+              <span><i aria-hidden="true">✦</i> Yojana ki jaankari</span>
+            </div>
           </div>
           <div className="hero-art" aria-hidden="true">
             <span className="sun" />
@@ -545,13 +511,29 @@ function GraminMitraApp() {
             <span className="field field-front" />
             <span className="art-leaf leaf-one">✦</span>
             <span className="art-leaf leaf-two">✦</span>
+            <div className="hero-art-card">
+              <span className="hero-art-card-icon">🌱</span>
+              <span>
+                <strong>Gaon se judi salah</strong>
+                <small>Fasal · Upchaar · Yojana</small>
+              </span>
+              <span className="hero-art-spark">✦</span>
+            </div>
           </div>
         </section>
 
         <div className="workspace">
           <section className="assistant-panel" aria-label="Kisan sawal form">
+            <div className="assistant-intro">
+              <div>
+                <span className="assistant-eyebrow">AAPKA DIGITAL KRISHI SAATHI</span>
+                <h2>Batayein, aaj kis baat mein madad chahiye?</h2>
+                <p>Ek vishay chunein, ya apni pareshani seedhe likhein.</p>
+              </div>
+              <span className="assistant-intro-icon" aria-hidden="true">✍️</span>
+            </div>
             <div className="presets">
-              <span className="presets-label">⚡ Jaldi shuru karein</span>
+              <span className="presets-label">Jaldi shuru karein</span>
               <div className="chip-list">
                 {PRESETS?.map((preset) => (
                   <button
@@ -571,7 +553,7 @@ function GraminMitraApp() {
 
             <form className="query-form" onSubmit={handleAsk}>
               <label className="field-label" htmlFor="farmer-question">
-                Aapki kya madad karun?
+                Aapka sawal
               </label>
               <div className="textarea-wrap">
                 <textarea
@@ -580,7 +562,7 @@ function GraminMitraApp() {
                   maxLength={2000}
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="Apni fasal, rog, sarkari yojana ya sinchai ki pareshani yahan likhein..."
+                  placeholder="Jaise: meri dhaan ki fasal ke patte peele ho rahe hain—main kya karun?"
                   disabled={loading}
                   required
                 />
@@ -588,8 +570,8 @@ function GraminMitraApp() {
               </div>
               <div className="form-footer">
                 <p className="form-note">
-                  <span aria-hidden="true">🔒</span> Aapka sawal sirf jawab
-                  banane ke liye bheja jayega.
+                  <span aria-hidden="true">🔒</span> Aapka sawal surakshit server
+                  ke zariye AI tak jayega.
                 </p>
                 <button
                   className="submit-button"
@@ -607,8 +589,8 @@ function GraminMitraApp() {
                 </button>
               </div>
               <p className="inline-hint">
-                <span aria-hidden="true">✦</span> Preset chunne ke baad sawal
-                dekhein ya badlein, phir button dabayein.
+                <span aria-hidden="true">✦</span> Aap jitni jaankari denge, salah
+                utni hi upyogi hogi. Bhejne se pehle apna sawal zaroor jaanch lein.
               </p>
             </form>
 
@@ -635,78 +617,24 @@ function GraminMitraApp() {
             )
           )}
 
-          <details
+          <p
             style={{
-              marginTop: 22,
-              overflow: "hidden",
-              border: "1px solid rgba(167, 243, 208, 0.1)",
-              borderRadius: 12,
-              background: "rgba(6, 55, 42, 0.32)",
+              margin: "20px 0 0",
+              color: "#789888",
+              fontSize: 11,
+              lineHeight: 1.6,
+              textAlign: "center",
             }}
           >
-            <summary
-              style={{
-                padding: "12px 15px",
-                color: "#91aea0",
-                cursor: "pointer",
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
-              ⚙️ Evaluation / Developer Settings
-              <span
-                style={{
-                  float: "right",
-                  color: apiKey.trim() || getInitialApiKey() ? "#6ee7b7" : "#91aea0",
-                  fontSize: 11,
-                  fontWeight: 500,
-                }}
-              >
-                {apiKey.trim() || getInitialApiKey()
-                  ? "API key configured"
-                  : "Optional"}
-              </span>
-            </summary>
-            <div
-              style={{
-                padding: "0 15px 14px",
-                borderTop: "1px solid rgba(167, 243, 208, 0.08)",
-              }}
-            >
-              <label
-                htmlFor="api-key"
-                style={{
-                  display: "block",
-                  margin: "13px 0 7px",
-                  color: "#c2d7ca",
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}
-              >
-                Google AI Studio API Key
-              </label>
-              <input
-                id="api-key"
-                className="api-key-input"
-                type="password"
-                autoComplete="off"
-                spellCheck="false"
-                value={apiKey}
-                onChange={handleApiKeyChange}
-                placeholder="Judge ke liye optional custom key"
-              />
-              <p className="field-hint">
-                Saved key ya VITE_GEMINI_API_KEY automatically use hoti hai.
-              </p>
-            </div>
-          </details>
+            🔒 AI connection is protected by Gramin-Mitra’s secure server.
+          </p>
         </div>
       </main>
 
       <footer className="site-footer">
         <span>Gramin-Mitra AI</span>
-        <span className="footer-divider" aria-hidden="true">•</span>
-        Kisanon ke liye, kisanon ke saath
+        <span className="footer-divider" aria-hidden="true">✦</span>
+        Aapki mehnat, hamari madad.
       </footer>
     </div>
   );

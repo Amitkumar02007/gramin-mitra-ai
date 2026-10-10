@@ -29,3 +29,24 @@ Over 65% of rural communities and farmers in India face two critical technologic
 ---
 
 ## 🏗️ Architecture
+
+The browser calls the same-origin `/api/gemma` Vercel Function. The function
+keeps the Google AI Studio credential server-side and tries Gemini 3.8 Flash
+first, then the configured fallback models. Never use a `VITE_` prefix for
+the provider key: Vite publishes `VITE_` variables in browser assets.
+
+### Configure AI access
+
+1. Create a Google AI Studio API key and keep it private.
+2. In Vercel, open the project **Settings → Environment Variables** and add
+   `GEMINI_API_KEY` for the environments you deploy to. Do not add the key as a
+   `VITE_` variable or commit it to Git.
+3. For local development, create an ignored `.env.local` file in the project
+   root with `GEMINI_API_KEY=your_private_key`, then run `npx vercel dev` so
+   both the Vite app and `/api/gemma` function are available locally.
+4. Configure request rate limits for `/api/gemma` in your deployment platform
+   before opening the demo to public traffic. The function is a public endpoint
+   and an exposed provider key could otherwise be used to incur API charges.
+
+The old browser API key is no longer used and the app clears the legacy
+`GEMINI_API_KEY` localStorage entries when it starts.
