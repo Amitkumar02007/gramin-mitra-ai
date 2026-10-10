@@ -1,8 +1,6 @@
-import { useState } from "react";
-import { getSavedApiKey } from "./components/ApiKeyBar.jsx";
+import React, { useState } from "react";
 import { askGemma } from "./services/gemmaService.js";
 
-const ENV_API_KEY = import.meta.env.VITE_GEMINI_API_KEY?.trim() || "";
 const DEFAULT_HELPLINE = "Kisan Call Center: 1800-180-1551";
 
 const PRESETS = [
@@ -22,6 +20,25 @@ const PRESETS = [
       "Ghar par sasti neem aur gobar ki jaivik khad banane ka aasan tarika kya hai?",
   },
 ];
+
+const getInitialApiKey = () => {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const saved = window.localStorage.getItem("GEMINI_API_KEY");
+      if (saved) return saved;
+    }
+    if (
+      typeof import.meta !== "undefined" &&
+      import.meta.env &&
+      import.meta.env.VITE_GEMINI_API_KEY
+    ) {
+      return import.meta.env.VITE_GEMINI_API_KEY;
+    }
+  } catch (error) {
+    console.warn("Could not retrieve the Google AI Studio API key.", error);
+  }
+  return "";
+};
 
 const cardStyles = {
   base: {
@@ -114,17 +131,17 @@ function normalizeAnswer(text) {
   const riskScore = Number.isFinite(parsedScore)
     ? Math.min(100, Math.max(0, Math.round(parsedScore)))
     : 0;
-  const schemes = Array.isArray(parsed.government_schemes)
+  const schemes = Array.isArray(parsed?.government_schemes)
     ? parsed.government_schemes
-        .filter((scheme) => scheme && typeof scheme === "object")
-        .map((scheme) => ({
+        ?.filter((scheme) => scheme && typeof scheme === "object")
+        ?.map((scheme) => ({
           name: asText(scheme.name, "Sarkari yojana"),
           benefit: asText(scheme.benefit, "Fayde ki jankari uplabdh nahi hai."),
           howToApply: asText(
             scheme.how_to_apply,
             "Apne najdeeki krishi karyalaya ya adhikarik portal par sampark karein.",
           ),
-        }))
+        })) || []
     : [];
   const helpline = asText(parsed.emergency_helpline, DEFAULT_HELPLINE);
 
@@ -138,18 +155,14 @@ function normalizeAnswer(text) {
     ),
     riskScore,
     diagnosis: asText(parsed.diagnosis, "Vistar se pehchan nahi di gayi."),
-    remedies: Array.isArray(parsed.desi_remedies)
-      ? parsed.desi_remedies.filter(
+    remedies: Array.isArray(parsed?.desi_remedies)
+      ? parsed.desi_remedies?.filter(
           (remedy) => typeof remedy === "string" && remedy.trim(),
-        )
+        ) || []
       : [],
     schemes,
     helpline,
   };
-}
-
-function getInitialApiKey() {
-  return getSavedApiKey().trim() || ENV_API_KEY;
 }
 
 function getRiskColors(score) {
@@ -189,8 +202,11 @@ function ResultCard({ children, color, background }) {
 }
 
 function SolutionView({ answer }) {
-  const riskColors = getRiskColors(answer.riskScore);
-  const callableNumber = answer.helpline.replace(/[^\d+]/g, "");
+  const safeAnswer = answer || {};
+  const riskColors = getRiskColors(safeAnswer.riskScore || 0);
+  const callableNumber = (safeAnswer.helpline || DEFAULT_HELPLINE).replace(/[^\d+]/g, "");
+  const remedies = Array.isArray(safeAnswer.remedies) ? safeAnswer.remedies : [];
+  const schemes = Array.isArray(safeAnswer.schemes) ? safeAnswer.schemes : [];
   const phoneHref = callableNumber
     ? `tel:${callableNumber}`
     : "tel:18001801551";
@@ -221,19 +237,19 @@ function SolutionView({ answer }) {
                 backgroundColor: riskColors.background,
               }}
             >
-              {answer.diseaseName}
+              {safeAnswer.diseaseName || "Samasya ki pehchan"}
             </span>
           </h3>
-          {answer.greeting && (
+          {safeAnswer.greeting && (
             <p style={{ ...cardStyles.body, marginBottom: 10 }}>
-              {answer.greeting}
+              {safeAnswer.greeting}
             </p>
           )}
           <p style={{ ...cardStyles.body, marginBottom: 8 }}>
             <strong style={{ color: "#fcd34d" }}>Fasal / sandarbh:</strong>{" "}
-            {answer.crop}
+            {safeAnswer.crop || "Aapki fasal / query"}
           </p>
-          <p style={cardStyles.body}>{answer.diagnosis}</p>
+          <p style={cardStyles.body}>{safeAnswer.diagnosis || "Vistar se pehchan nahi di gayi."}</p>
 
           <div style={{ marginTop: 17 }}>
             <div
@@ -248,7 +264,7 @@ function SolutionView({ answer }) {
             >
               <strong>Fasal Risk Meter</strong>
               <span style={{ color: riskColors.foreground, fontWeight: 700 }}>
-                {answer.riskLevel} · {answer.riskScore}%
+                {safeAnswer.riskLevel || "Samanya"} · {safeAnswer.riskScore || 0}%
               </span>
             </div>
             <div
@@ -256,7 +272,7 @@ function SolutionView({ answer }) {
               aria-label="Fasal risk score"
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-valuenow={answer.riskScore}
+              aria-valuenow={safeAnswer.riskScore || 0}
               style={{
                 height: 9,
                 overflow: "hidden",
@@ -266,7 +282,7 @@ function SolutionView({ answer }) {
             >
               <div
                 style={{
-                  width: `${answer.riskScore}%`,
+                  width: `${safeAnswer.riskScore || 0}%`,
                   height: "100%",
                   borderRadius: "inherit",
                   backgroundColor: riskColors.foreground,
@@ -294,7 +310,7 @@ function SolutionView({ answer }) {
               Step-by-step
             </span>
           </h3>
-          {answer.remedies.length ? (
+          {remedies.length ? (
             <ol
               style={{
                 display: "grid",
@@ -304,7 +320,7 @@ function SolutionView({ answer }) {
                 listStyle: "none",
               }}
             >
-              {answer.remedies.map((remedy, index) => (
+              {remedies?.map((remedy, index) => (
                 <li
                   key={`${index}-${remedy}`}
                   style={{
@@ -335,7 +351,7 @@ function SolutionView({ answer }) {
                   </span>
                   <span>{remedy}</span>
                 </li>
-              ))}
+              )) || []}
             </ol>
           ) : (
             <p style={cardStyles.body}>Is query ke liye upchaar ki jankari nahi mili.</p>
@@ -359,15 +375,15 @@ function SolutionView({ answer }) {
               Kisan support
             </span>
           </h3>
-          {answer.schemes.length ? (
+          {schemes.length ? (
             <div style={{ display: "grid", gap: 13 }}>
-              {answer.schemes.map((scheme, index) => (
+              {schemes?.map((scheme, index) => (
                 <div
                   key={`${scheme.name}-${index}`}
                   style={{
                     paddingBottom: 12,
                     borderBottom:
-                      index < answer.schemes.length - 1
+                      index < schemes.length - 1
                         ? "1px solid rgba(147, 197, 253, 0.12)"
                         : "none",
                   }}
@@ -387,7 +403,7 @@ function SolutionView({ answer }) {
                     {scheme.howToApply}
                   </p>
                 </div>
-              ))}
+              )) || []}
             </div>
           ) : (
             <p style={{ ...cardStyles.body, marginBottom: 13 }}>
@@ -412,7 +428,7 @@ function SolutionView({ answer }) {
               textDecoration: "none",
             }}
           >
-            📞 {answer.helpline}
+            📞 {safeAnswer.helpline || DEFAULT_HELPLINE}
           </a>
         </ResultCard>
       </div>
@@ -424,7 +440,7 @@ function SolutionView({ answer }) {
   );
 }
 
-export default function App() {
+function GraminMitraApp() {
   const [apiKey, setApiKey] = useState(getInitialApiKey);
   const [prompt, setPrompt] = useState("");
   const [answer, setAnswer] = useState(null);
@@ -451,7 +467,7 @@ export default function App() {
   async function handleAsk(event) {
     event.preventDefault();
     const query = prompt.trim();
-    const effectiveApiKey = apiKey.trim() || ENV_API_KEY;
+    const effectiveApiKey = apiKey.trim() || getInitialApiKey().trim();
 
     if (!query) {
       setError("Kripya kisan bhai apni samasya likhein ya koi preset chunein.");
@@ -533,82 +549,11 @@ export default function App() {
         </section>
 
         <div className="workspace">
-          <details
-            style={{
-              marginBottom: 14,
-              overflow: "hidden",
-              border: "1px solid rgba(167, 243, 208, 0.13)",
-              borderRadius: 14,
-              background: "rgba(6, 55, 42, 0.55)",
-            }}
-          >
-            <summary
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                padding: "15px 17px",
-                color: "#c2d7ca",
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: 700,
-                listStylePosition: "inside",
-              }}
-            >
-              <span>⚙️ Developer &amp; Evaluation Settings</span>
-              <span
-                style={{
-                  color: apiKey.trim() || ENV_API_KEY ? "#6ee7b7" : "#fbbf24",
-                  fontSize: 11,
-                  fontWeight: 600,
-                }}
-              >
-                {apiKey.trim() || ENV_API_KEY
-                  ? "API key configured"
-                  : "API key required"}
-              </span>
-            </summary>
-            <div
-              style={{
-                padding: "0 17px 16px",
-                borderTop: "1px solid rgba(167, 243, 208, 0.1)",
-              }}
-            >
-              <label
-                htmlFor="api-key"
-                style={{
-                  display: "block",
-                  margin: "14px 0 7px",
-                  color: "#d3e7dc",
-                  fontSize: 12,
-                  fontWeight: 700,
-                }}
-              >
-                🔑 Google AI Studio API Key
-              </label>
-              <input
-                id="api-key"
-                className="api-key-input"
-                type="password"
-                autoComplete="off"
-                spellCheck="false"
-                value={apiKey}
-                onChange={handleApiKeyChange}
-                placeholder="Paste your Google AI Studio API key here..."
-              />
-              <p className="field-hint">
-                Browser-saved key pehle use hogi; warna VITE_GEMINI_API_KEY.
-                Primary: Gemini 3.8 Flash, with automatic model fallback.
-              </p>
-            </div>
-          </details>
-
           <section className="assistant-panel" aria-label="Kisan sawal form">
             <div className="presets">
               <span className="presets-label">⚡ Jaldi shuru karein</span>
               <div className="chip-list">
-                {PRESETS.map((preset) => (
+                {PRESETS?.map((preset) => (
                   <button
                     className="preset-chip"
                     key={preset.label}
@@ -620,7 +565,7 @@ export default function App() {
                   >
                     {preset.label}
                   </button>
-                ))}
+                )) || []}
               </div>
             </div>
 
@@ -657,7 +602,7 @@ export default function App() {
                       Samadhan dhoondh rahe hain...
                     </>
                   ) : (
-                    "Samadhan Prapt Karein 🚜"
+                    "Samadhan Prapt Karein (Ask AI) 🚜"
                   )}
                 </button>
               </div>
@@ -689,6 +634,72 @@ export default function App() {
               </div>
             )
           )}
+
+          <details
+            style={{
+              marginTop: 22,
+              overflow: "hidden",
+              border: "1px solid rgba(167, 243, 208, 0.1)",
+              borderRadius: 12,
+              background: "rgba(6, 55, 42, 0.32)",
+            }}
+          >
+            <summary
+              style={{
+                padding: "12px 15px",
+                color: "#91aea0",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              ⚙️ Evaluation / Developer Settings
+              <span
+                style={{
+                  float: "right",
+                  color: apiKey.trim() || getInitialApiKey() ? "#6ee7b7" : "#91aea0",
+                  fontSize: 11,
+                  fontWeight: 500,
+                }}
+              >
+                {apiKey.trim() || getInitialApiKey()
+                  ? "API key configured"
+                  : "Optional"}
+              </span>
+            </summary>
+            <div
+              style={{
+                padding: "0 15px 14px",
+                borderTop: "1px solid rgba(167, 243, 208, 0.08)",
+              }}
+            >
+              <label
+                htmlFor="api-key"
+                style={{
+                  display: "block",
+                  margin: "13px 0 7px",
+                  color: "#c2d7ca",
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                Google AI Studio API Key
+              </label>
+              <input
+                id="api-key"
+                className="api-key-input"
+                type="password"
+                autoComplete="off"
+                spellCheck="false"
+                value={apiKey}
+                onChange={handleApiKeyChange}
+                placeholder="Judge ke liye optional custom key"
+              />
+              <p className="field-hint">
+                Saved key ya VITE_GEMINI_API_KEY automatically use hoti hai.
+              </p>
+            </div>
+          </details>
         </div>
       </main>
 
@@ -698,5 +709,81 @@ export default function App() {
         Kisanon ke liye, kisanon ke saath
       </footer>
     </div>
+  );
+}
+
+class AppErrorBoundary extends React.Component {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("Gramin-Mitra UI render error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div
+          className="app-shell"
+          role="alert"
+          style={{
+            display: "grid",
+            minHeight: "100vh",
+            placeItems: "center",
+            padding: 24,
+          }}
+        >
+          <main
+            style={{
+              width: "min(100%, 560px)",
+              padding: 24,
+              border: "1px solid rgba(248, 113, 113, 0.35)",
+              borderRadius: 16,
+              background: "rgba(6, 55, 42, 0.9)",
+              color: "#e7f5ed",
+              textAlign: "center",
+            }}
+          >
+            <div aria-hidden="true" style={{ fontSize: 32 }}>🌾</div>
+            <h1 style={{ margin: "12px 0 8px", fontSize: 20 }}>
+              Gramin-Mitra ko load karne mein dikkat hui
+            </h1>
+            <p style={{ margin: 0, color: "#a8c2b4", lineHeight: 1.6 }}>
+              Aapka sawal ya jawab delete nahi hua. Page refresh karke dobara
+              koshish karein.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              style={{
+                marginTop: 18,
+                padding: "11px 16px",
+                border: 0,
+                borderRadius: 9,
+                background: "#10b981",
+                color: "#022c22",
+                cursor: "pointer",
+                fontWeight: 800,
+              }}
+            >
+              Page dobara kholein
+            </button>
+          </main>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+export default function App() {
+  return (
+    <AppErrorBoundary>
+      <GraminMitraApp />
+    </AppErrorBoundary>
   );
 }
