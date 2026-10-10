@@ -30,27 +30,20 @@ Over 65% of rural communities and farmers in India face two critical technologic
 
 ## 🏗️ Architecture
 
-The browser calls the same-origin `/api/gemma` Vercel Function. The function
-keeps the Google AI Studio credential server-side and tries Gemini 2.5 Flash,
-then Gemini 2.0 Flash as a fallback. Never use a `VITE_` prefix for
-the provider key: Vite publishes `VITE_` variables in browser assets.
+The current demo calls Gemini 2.5 Flash directly from the browser using the
+Google AI Studio API key entered into the form. The key is kept in memory for
+the current page session and is not written to local storage or included in
+the application bundle. The app requests a strict JSON response and renders
+crop identification, local remedies, and government-scheme information.
 
 ### Configure AI access
 
 1. Create a Google AI Studio API key and keep it private.
-2. In Vercel, open the project **Settings → Environment Variables** and add
-   `GEMINI_API_KEY` for the environments you deploy to. Do not add the key as a
-   `VITE_` variable or commit it to Git.
-3. For local development, create an ignored `.env.local` file in the project
-   root with `GEMINI_API_KEY=your_private_key`, then run `npm run dev`.
-   The Vite development middleware serves `/api/gemma` locally and reads the
-   key on the server only. You can also run `npx vercel dev` to use Vercel's
-   local function runtime.
-4. Configure request rate limits for `/api/gemma` in your deployment platform
-   before opening the demo to public traffic. The function is a public endpoint
-   and an exposed provider key could otherwise be used to incur API charges.
-
-The optional Evaluation / API Key field is for judges who need to supply their
-own key; it is saved in that browser's local storage and sent to the API route
-for that request. Leave it blank to use the server-side `GEMINI_API_KEY`.
-Clear the field after evaluation if you do not want the browser to retain it.
+2. Enter the key in the app when prompted. It is sent to Google's API and is
+   not saved by the app; the browser's network tools can still expose it to the
+   person using that browser.
+3. This direct-key demo is intended for individual evaluation. Do not publish
+   or share a deployed instance with an embedded or shared key. For public
+   production use, proxy requests through a rate-limited server-side endpoint
+   and keep the provider key only in server-side environment variables (never
+   a `VITE_` variable).
