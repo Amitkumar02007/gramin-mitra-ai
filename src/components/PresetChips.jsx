@@ -1,34 +1,52 @@
 const PRESETS = [
   {
-    label: "Fasal Rog",
+    label: "🌾 Fasal Bimari (धान/गेहूँ)",
     prompt:
-      "Mere dhan ke patton par bhure dhabbe aa rahe hain aur paudhe murjha rahe hain. Kam kharch mein main kya jaanch aur upay karun?",
+      "Dhaan ke patte peele pad rahe hain aur brown daag hain. Desi aur kam kharche wala ilaj batayein.",
   },
   {
-    label: "Sarkari Yojana",
+    label: "📜 Sarkari KCC & Bima",
     prompt:
-      "Main chhota kisan hoon. PM-Kisan, KCC aur Fasal Bima ke liye kaise pata karun ki main eligible hoon aur kahan apply karna hai?",
+      "Chhote kisan ke liye Kisan Credit Card (KCC) aur Fasal Bima yojana lene ka aasan tarika kya hai?",
   },
   {
-    label: "Jaivik Khad",
+    label: "🌿 Desi Jaivik Khad",
     prompt:
-      "Ghar aur gaushala mein milne wali cheezon se kam kharch ki jaivik khad kaise banaun aur khet mein kab daalun?",
+      "Ghar par sasti neem aur gobar ki jaivik khad banane ka aasan tarika kya hai?",
   },
 ];
 
 export default function PresetChips({ onSelect }) {
   return (
-    <div className="presets" aria-label="Jaldi poochhein">
-      <span className="presets-label">Jaldi poochhein</span>
-      <div className="chip-list">
+    <div style={{ marginBottom: 16 }}>
+      <span
+        style={{
+          display: "block",
+          marginBottom: 8,
+          color: "#a7f3d0",
+          fontSize: "0.88rem",
+          fontWeight: 600,
+        }}
+      >
+        ⚡ Turant Jankari (Click to try):
+      </span>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {PRESETS.map((preset) => (
           <button
-            className="preset-chip"
             key={preset.label}
             type="button"
-            onClick={() => onSelect(preset.prompt)}
+            onClick={() => onSelect?.(preset.prompt)}
+            style={{
+              padding: "8px 12px",
+              border: "1px solid #34d399",
+              borderRadius: 8,
+              backgroundColor: "#065f46",
+              color: "#ecfdf5",
+              fontSize: "0.85rem",
+              cursor: "pointer",
+              transition: "background-color 0.2s ease",
+            }}
           >
-            <span aria-hidden="true">↗</span>
             {preset.label}
           </button>
         ))}
